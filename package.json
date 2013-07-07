@@ -1,0 +1,29 @@
+{
+  "name": "xattr-async",
+  "description": "Node.js async xattr library",
+  "version": "0.1.0",
+  "author": "Luka Zakrajsek <luka@koofr.net>",
+  "keywords": [
+    "xattr",
+    "async"
+  ],
+  "homepage": "https://github.com/bancek/node-xattr-async",
+  "bugs": "https://github.com/bancek/node-xattr-async/issues",
+  "repository": "git://github.com/bancek/node-xattr-async",
+  "licenses": [
+    {
+      "type": "MIT"
+    }
+  ],
+  "main": "./build/Release/xattrAsync",
+  "engines": {
+    "node": "*"
+  },
+  "devDependencies": {
+    "mocha": "~1.12.0",
+    "chai": "~1.7.2"
+  },
+  "scripts": {
+    "test": "mocha test"
+  }
+}

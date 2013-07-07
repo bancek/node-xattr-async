@@ -77,39 +77,60 @@ void ListWork(uv_work_t* req) {
 
     int res;
 
-    if (baton->no_follow) {
-        res = llistxattr(path, NULL, 0);
-    } else {
-        res = listxattr(path, NULL, 0);
-    }
+    int retry;
 
-    if (res == -1) {
-        baton->error = true;
-        baton->errorno = errno;
-        baton->error_message = strerror(errno);
-        return;
-    }
+    // if attributes are changed between two listxattr calls, lengths won't match and we'll get error
+    for (retry = 100; retry >= 0; retry--) {
+        if (baton->no_follow) {
+            res = llistxattr(path, NULL, 0);
+        } else {
+            res = listxattr(path, NULL, 0);
+        }
 
-    if (res == 0) {
-        baton->result_len = 0;
-        return;
-    }
+        if (res == -1) {
+            baton->error = true;
+            baton->errorno = errno;
+            baton->error_message = strerror(errno);
+            return;
+        }
 
-    baton->result_len = res;
+        if (res == 0) {
+            baton->result_len = 0;
+            return;
+        }
 
-    baton->result = (char*) malloc(baton->result_len * sizeof(char));
+        baton->result_len = res;
 
-    if (baton->no_follow) {
-        res = llistxattr(path, baton->result, baton->result_len);
-    } else {
-        res = listxattr(path, baton->result, baton->result_len);
-    }
+        baton->result = (char*) malloc(baton->result_len * sizeof(char));
 
-    if (res == -1) {
-        baton->error = true;
-        baton->errorno = errno;
-        baton->error_message = strerror(errno);
-        return;
+        if (baton->no_follow) {
+            res = llistxattr(path, baton->result, baton->result_len);
+        } else {
+            res = listxattr(path, baton->result, baton->result_len);
+        }
+
+        // attribute was removed between our calls
+        if (res != baton->result_len) {
+            delete baton->result;
+
+            continue;
+        }
+
+        if (res == -1) {
+            delete baton->result;
+
+            // new attribute was set between our calls
+            if (errno == ERANGE && retry > 0) {
+                continue;
+            }
+
+            baton->error = true;
+            baton->errorno = errno;
+            baton->error_message = strerror(errno);
+            return;
+        }
+
+        break;
     }
 }
 
@@ -225,41 +246,60 @@ void GetWork(uv_work_t* req) {
 
     int res;
 
-    if (baton->no_follow) {
-        res = lgetxattr(path, name, NULL, 0);
-    } else {
-        res = getxattr(path, name, NULL, 0);
+    int retry;
+
+    // if attribute changes between two getxattr calls, lengths won't match and we'll get error
+    for (retry = 100; retry >= 0; retry--) {
+        if (baton->no_follow) {
+            res = lgetxattr(path, name, NULL, 0);
+        } else {
+            res = getxattr(path, name, NULL, 0);
+        }
+
+        if (res == -1) {
+            baton->error = true;
+            baton->errorno = errno;
+            baton->error_message = strerror(errno);
+            return;
+        }
+
+        int len = res;
+
+        char *attr = (char*) malloc((len + 1) * sizeof(char));
+
+        if (baton->no_follow) {
+            res = getxattr(path, name, attr, len);
+        } else {
+            res = getxattr(path, name, attr, len);
+        }
+
+        // attribute was changed between our calls
+        if (res != len) {
+            delete attr;
+
+            continue;
+        }
+
+        if (res == -1) {
+            delete attr;
+
+            // new attribute was set between our calls
+            if (errno == ERANGE && retry > 0) {
+                continue;
+            }
+
+            baton->error = true;
+            baton->errorno = errno;
+            baton->error_message = strerror(errno);
+            return;
+        }
+
+        attr[len] = 0;
+
+        baton->result = std::string(attr);
+
+        delete attr;
     }
-
-    if (res == -1) {
-        baton->error = true;
-        baton->errorno = errno;
-        baton->error_message = strerror(errno);
-        return;
-    }
-
-    int len = res;
-
-    char *attr = (char*) malloc((len + 1) * sizeof(char));
-
-    if (baton->no_follow) {
-        res = getxattr(path, name, attr, len);
-    } else {
-        res = getxattr(path, name, attr, len);
-    }
-
-    attr[len] = 0;
-
-    if (res == -1) {
-        baton->error = true;
-        baton->errorno = errno;
-        baton->error_message = strerror(errno);
-        return;
-    }
-
-    baton->result = std::string(attr);
-
-    delete attr;
 }
 
 void GetAfter(uv_work_t* req) {

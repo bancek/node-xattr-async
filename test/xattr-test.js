@@ -47,7 +47,7 @@ describe('xattr', function() {
   it('should not list attrs for nonexisting file', function(done) {
     xattr.list(nonexistingFile, function(err, attrs) {
       should.exist(err);
-      err.errno.should.equal(2);
+      err.code.should.equal('ENOENT');
       done();
     });
   });
@@ -62,7 +62,7 @@ describe('xattr', function() {
   it('should not set attr to nonexisting file', function(done) {
     xattr.set(nonexistingFile, 'user.foo', 'bar', function(err) {
       should.exist(err);
-      err.errno.should.equal(2);
+      err.code.should.equal('ENOENT');
       done();
     });
   });
@@ -79,7 +79,7 @@ describe('xattr', function() {
   it('should not get nonexisting attr', function(done) {
     xattr.get(file, 'user.foo', function(err, attr) {
       should.exist(err);
-      err.errno.should.equal(61);
+      err.code.should.equal('ENODATA');
       done();
     });
   });
@@ -87,7 +87,7 @@ describe('xattr', function() {
   it('should not get attr for nonexisting file', function(done) {
     xattr.get(nonexistingFile, 'user.foo', function(err) {
       should.exist(err);
-      err.errno.should.equal(2);
+      err.code.should.equal('ENOENT');
       done();
     });
   });
@@ -102,7 +102,7 @@ describe('xattr', function() {
 
           xattr.get(file, 'user.foo', function(err) {
             should.exist(err);
-            err.errno.should.equal(61);
+            err.code.should.equal('ENODATA');
             done();
           });
         });

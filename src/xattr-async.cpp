@@ -70,6 +70,16 @@ std::string ValueToString(Local<Value> value) {
     return std::string(*ascii_value);
 }
 
+void SetErrorCode(Local<Value> err, int errorno) {
+    if (errorno == ENOENT) {
+        err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENOENT"));
+    } else if (errorno == ENODATA || errorno == ENOATTR) {
+        err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENODATA"));
+    } else {
+        err->ToObject()->Set(NODE_PSYMBOL("code"), Undefined());
+    }
+}
+
 void ListWork(uv_work_t* req) {
     ListBaton* baton = static_cast<ListBaton*>(req->data);
 
@@ -82,9 +92,17 @@ void ListWork(uv_work_t* req) {
     // if attributes are changed between two listxattr calls, lengths won't match and we'll get error
     for (retry = 100; retry >= 0; retry--) {
         if (baton->no_follow) {
+#ifdef __APPLE__
+            res = listxattr(path, NULL, 0, XATTR_NOFOLLOW);
+#else
             res = llistxattr(path, NULL, 0);
+#endif
         } else {
+#ifdef __APPLE__
+            res = listxattr(path, NULL, 0, 0);
+#else
             res = listxattr(path, NULL, 0);
+#endif
         }
 
         if (res == -1) {
@@ -104,9 +122,17 @@ void ListWork(uv_work_t* req) {
         baton->result = (char*) malloc(baton->result_len * sizeof(char));
 
         if (baton->no_follow) {
+#ifdef __APPLE__
+            res = listxattr(path, baton->result, baton->result_len, XATTR_NOFOLLOW);
+#else
             res = llistxattr(path, baton->result, baton->result_len);
+#endif
         } else {
+#ifdef __APPLE__
+            res = listxattr(path, baton->result, baton->result_len, 0);
+#else
             res = listxattr(path, baton->result, baton->result_len);
+#endif
         }
 
         // attribute was removed between our calls
@@ -142,6 +168,8 @@ void ListAfter(uv_work_t* req) {
         Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
 
         err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
+
+        SetErrorCode(err, baton->errorno);
 
         const unsigned argc = 1;
         Local<Value> argv[argc] = { err };
@@ -251,9 +279,17 @@ void GetWork(uv_work_t* req) {
     // if attribute changes between two getxattr calls, lengths won't match and we'll get error
     for (retry = 100; retry >= 0; retry--) {
         if (baton->no_follow) {
+#ifdef __APPLE__
+            res = getxattr(path, name, NULL, 0, 0, XATTR_NOFOLLOW);
+#else
             res = lgetxattr(path, name, NULL, 0);
+#endif
         } else {
+#ifdef __APPLE__
+            res = getxattr(path, name, NULL, 0, 0, 0);
+#else
             res = getxattr(path, name, NULL, 0);
+#endif
         }
 
         if (res == -1) {
@@ -268,9 +304,17 @@ void GetWork(uv_work_t* req) {
         char *attr = (char*) malloc((len + 1) * sizeof(char));
 
         if (baton->no_follow) {
-            res = getxattr(path, name, attr, len);
+#ifdef __APPLE__
+            res = getxattr(path, name, attr, len, 0, XATTR_NOFOLLOW);
+#else
+            res = lgetxattr(path, name, attr, len);
+#endif
         } else {
+#ifdef __APPLE__
+            res = getxattr(path, name, attr, len, 0, 0);
+#else
             res = getxattr(path, name, attr, len);
+#endif
         }
 
         // attribute was changed between our calls
@@ -310,6 +354,8 @@ void GetAfter(uv_work_t* req) {
         Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
 
         err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
+
+        SetErrorCode(err, baton->errorno);
 
         const unsigned argc = 1;
         Local<Value> argv[argc] = { err };
@@ -401,9 +447,17 @@ void SetWork(uv_work_t* req) {
     int res;
 
     if (baton->no_follow) {
+#ifdef __APPLE__
+        res = setxattr(path, name, value, baton->value.length(), 0, XATTR_NOFOLLOW);
+#else
         res = lsetxattr(path, name, value, baton->value.length(), 0);
+#endif
     } else {
+#ifdef __APPLE__
+        res = setxattr(path, name, value, baton->value.length(), 0, 0);
+#else
         res = setxattr(path, name, value, baton->value.length(), 0);
+#endif
     }
 
     if (res == -1) {
@@ -422,6 +476,8 @@ void SetAfter(uv_work_t* req) {
         Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
 
         err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
+
+        SetErrorCode(err, baton->errorno);
 
         const unsigned argc = 1;
         Local<Value> argv[argc] = { err };
@@ -513,9 +569,17 @@ void RemoveWork(uv_work_t* req) {
     int res;
 
     if (baton->no_follow) {
+#ifdef __APPLE__
+        res = removexattr(path, name, XATTR_NOFOLLOW);
+#else
         res = lremovexattr(path, name);
+#endif
     } else {
+#ifdef __APPLE__
+        res = removexattr(path, name, 0);
+#else
         res = removexattr(path, name);
+#endif
     }
 
     if (res == -1) {
@@ -534,6 +598,8 @@ void RemoveAfter(uv_work_t* req) {
         Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
 
         err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
+
+        SetErrorCode(err, baton->errorno);
 
         const unsigned argc = 1;
         Local<Value> argv[argc] = { err };

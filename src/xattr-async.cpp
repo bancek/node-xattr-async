@@ -73,7 +73,11 @@ std::string ValueToString(Local<Value> value) {
 void SetErrorCode(Local<Value> err, int errorno) {
     if (errorno == ENOENT) {
         err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENOENT"));
-    } else if (errorno == ENODATA || errorno == ENOATTR) {
+#ifdef __APPLE__
+    } else if (errorno == ENOATTR) {
+#else
+    } else if (errorno == ENODATA) {
+#endif
         err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENODATA"));
     } else {
         err->ToObject()->Set(NODE_PSYMBOL("code"), Undefined());

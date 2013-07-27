@@ -323,13 +323,13 @@ void GetWork(uv_work_t* req) {
 
         // attribute was changed between our calls
         if (res != len) {
-            delete attr;
+            free(attr);
 
             continue;
         }
 
         if (res == -1) {
-            delete attr;
+            free(attr);
 
             // new attribute was set between our calls
             if (errno == ERANGE && retry > 0) {
@@ -346,7 +346,7 @@ void GetWork(uv_work_t* req) {
 
         baton->result = std::string(attr);
 
-        delete attr;
+        free(attr);
     }
 }
 

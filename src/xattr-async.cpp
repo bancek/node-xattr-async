@@ -70,6 +70,11 @@ std::string ValueToString(Local<Value> value) {
     return std::string(*ascii_value);
 }
 
+std::string ValueToUtf8String(Local<Value> value) {
+    v8::String::Utf8Value utf8(value);
+    return std::string(*utf8);
+}
+
 void SetErrorCode(Local<Value> err, int errorno) {
     if (errorno == ENOENT) {
         err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENOENT"));
@@ -233,7 +238,7 @@ Handle<Value> List(const Arguments& args) {
     baton->no_follow = false;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -258,7 +263,7 @@ Handle<Value> LList(const Arguments& args) {
     baton->no_follow = true;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -402,7 +407,7 @@ Handle<Value> Get(const Arguments& args) {
     baton->no_follow = false;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
 
     uv_work_t *req = new uv_work_t();
@@ -428,7 +433,7 @@ Handle<Value> LGet(const Arguments& args) {
     baton->no_follow = true;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
 
     uv_work_t *req = new uv_work_t();
@@ -523,7 +528,7 @@ Handle<Value> Set(const Arguments& args) {
     baton->no_follow = false;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
     baton->value = ValueToString(args[2]);
 
@@ -550,7 +555,7 @@ Handle<Value> LSet(const Arguments& args) {
     baton->no_follow = true;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
     baton->value = ValueToString(args[2]);
 
@@ -645,7 +650,7 @@ Handle<Value> Remove(const Arguments& args) {
     baton->no_follow = false;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
 
     uv_work_t *req = new uv_work_t();
@@ -671,7 +676,7 @@ Handle<Value> LRemove(const Arguments& args) {
     baton->no_follow = true;
     baton->error = false;
     baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToString(args[0]);
+    baton->path = ValueToUtf8String(args[0]);
     baton->name = ValueToString(args[1]);
 
     uv_work_t *req = new uv_work_t();

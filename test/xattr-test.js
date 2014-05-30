@@ -10,7 +10,7 @@ describe('xattr', function() {
   var nonexistingFile = null;
 
   beforeEach(function() {
-    file = path.join(os.tmpDir(), 'xattr-test');
+    file = path.join(os.tmpDir(), 'xattr-test-∞');
 
     nonexistingFile = path.join(os.tmpDir(), 'xattr-test-nonexisting');
 

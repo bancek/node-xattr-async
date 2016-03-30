@@ -1,15 +1,12 @@
-#include <node.h>
+#include <nan.h>
 #include <string>
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/xattr.h>
 
-using namespace v8;
-
-
 struct ListBaton {
-    Persistent<Function> callback;
+    Nan::Persistent<v8::Function> callback;
 
     bool no_follow;
 
@@ -24,7 +21,7 @@ struct ListBaton {
 };
 
 struct GetBaton {
-    Persistent<Function> callback;
+    Nan::Persistent<v8::Function> callback;
 
     bool no_follow;
 
@@ -39,7 +36,7 @@ struct GetBaton {
 };
 
 struct SetBaton {
-    Persistent<Function> callback;
+    Nan::Persistent<v8::Function> callback;
 
     bool no_follow;
 
@@ -53,7 +50,7 @@ struct SetBaton {
 };
 
 struct RemoveBaton {
-    Persistent<Function> callback;
+    Nan::Persistent<v8::Function> callback;
 
     bool no_follow;
 
@@ -65,27 +62,43 @@ struct RemoveBaton {
     std::string name;
 };
 
-std::string ValueToString(Local<Value> value) {
-    String::AsciiValue ascii_value(value);
-    return std::string(*ascii_value);
-}
-
-std::string ValueToUtf8String(Local<Value> value) {
-    v8::String::Utf8Value utf8(value);
+std::string ValueToUtf8String(v8::Local<v8::Value> value) {
+    Nan::Utf8String utf8(value);
     return std::string(*utf8);
 }
 
-void SetErrorCode(Local<Value> err, int errorno) {
+v8::Local<v8::Value> CreateError(std::string error_message, int errorno) {
+    v8::Local<v8::Value> err = Nan::Error(error_message.c_str());
+
+    err->ToObject()->Set(Nan::New("errno").ToLocalChecked(), Nan::New(errorno));
+
     if (errorno == ENOENT) {
-        err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENOENT"));
+        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::New("ENOENT").ToLocalChecked());
 #ifdef __APPLE__
     } else if (errorno == ENOATTR) {
 #else
     } else if (errorno == ENODATA) {
 #endif
-        err->ToObject()->Set(NODE_PSYMBOL("code"), String::New("ENODATA"));
+        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::New("ENODATA").ToLocalChecked());
     } else {
-        err->ToObject()->Set(NODE_PSYMBOL("code"), Undefined());
+        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::Undefined());
+    }
+
+    return err;
+}
+
+void CallbackError(std::string error_message, int errorno, v8::Local<v8::Function> callbackFn) {
+    Nan::Callback callback(callbackFn);
+
+    v8::Local<v8::Value> err = CreateError(error_message, errorno);
+
+    const unsigned argc = 1;
+    v8::Local<v8::Value> argv[argc] = { err };
+
+    Nan::TryCatch try_catch;
+    callback.Call(argc, argv);
+    if (try_catch.HasCaught()) {
+        Nan::FatalException(try_catch);
     }
 }
 
@@ -97,6 +110,8 @@ void ListWork(uv_work_t* req) {
     int res;
 
     int retry;
+
+    baton->result = NULL;
 
     // if attributes are changed between two listxattr calls, lengths won't match and we'll get error
     for (retry = 100; retry >= 0; retry--) {
@@ -146,13 +161,15 @@ void ListWork(uv_work_t* req) {
 
         // attribute was removed between our calls
         if (res != baton->result_len) {
-            delete baton->result;
+            free(baton->result);
+            baton->result = NULL;
 
             continue;
         }
 
         if (res == -1) {
-            delete baton->result;
+            free(baton->result);
+            baton->result = NULL;
 
             // new attribute was set between our calls
             if (errno == ERANGE && retry > 0) {
@@ -170,24 +187,12 @@ void ListWork(uv_work_t* req) {
 }
 
 void ListAfter(uv_work_t* req) {
-    HandleScope scope;
+    Nan::HandleScope scope;
+
     ListBaton* baton = static_cast<ListBaton*>(req->data);
 
     if (baton->error) {
-        Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
-
-        err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
-
-        SetErrorCode(err, baton->errorno);
-
-        const unsigned argc = 1;
-        Local<Value> argv[argc] = { err };
-
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
-        if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
-        }
+        CallbackError(baton->error_message.c_str(), baton->errorno, Nan::New(baton->callback));
     } else {
         int i;
         int cur;
@@ -198,47 +203,51 @@ void ListAfter(uv_work_t* req) {
             size++;
         }
 
-        Handle<Array> result = Array::New(size);
+        v8::Local<v8::Array> result = Nan::New<v8::Array>(size);
 
         for (i = 0, cur = 0; cur < baton->result_len; cur += len + 1, i++) {
             len = strlen(&baton->result[cur]);
-            result->Set(Number::New(i), String::New(&baton->result[cur]));
+            result->Set(i, Nan::New(&baton->result[cur]).ToLocalChecked());
         }
 
         const unsigned argc = 2;
-        Local<Value> argv[argc] = {
-            Local<Value>::New(Null()),
-            Local<Value>::New(result)
+        v8::Local<v8::Value> argv[argc] = {
+            Nan::Null(),
+            result
         };
 
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
+        Nan::TryCatch try_catch;
+        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
         if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
+            Nan::FatalException(try_catch);
         }
     }
 
-    baton->callback.Dispose();
+    baton->callback.Reset();
 
-    delete baton->result;
+    if (baton->result) {
+        delete baton->result;
+    }
+
     delete baton;
     delete req;
 }
 
-Handle<Value> List(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(List) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsFunction()) {
-        return ThrowException(String::New("Usage: list(path, callback)"));
+    if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
+        Nan::ThrowError("Usage: list(path, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[1]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[1]);
 
     ListBaton* baton = new ListBaton();
     baton->no_follow = false;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -246,24 +255,23 @@ Handle<Value> List(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, ListWork,
                                (uv_after_work_cb)ListAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
-Handle<Value> LList(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(LList) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsFunction()) {
-        return ThrowException(String::New("Usage: llist(path, callback)"));
+    if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
+        Nan::ThrowError("Usage: llist(path, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[1]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[1]);
 
     ListBaton* baton = new ListBaton();
     baton->no_follow = true;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -271,8 +279,6 @@ Handle<Value> LList(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, ListWork,
                                (uv_after_work_cb)ListAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
 void GetWork(uv_work_t* req) {
@@ -352,63 +358,54 @@ void GetWork(uv_work_t* req) {
         baton->result = std::string(attr);
 
         free(attr);
+
+        break;
     }
 }
 
 void GetAfter(uv_work_t* req) {
-    HandleScope scope;
+    Nan::HandleScope scope;
+
     GetBaton* baton = static_cast<GetBaton*>(req->data);
 
     if (baton->error) {
-        Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
-
-        err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
-
-        SetErrorCode(err, baton->errorno);
-
-        const unsigned argc = 1;
-        Local<Value> argv[argc] = { err };
-
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
-        if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
-        }
+        CallbackError(baton->error_message.c_str(), baton->errorno, Nan::New(baton->callback));
     } else {
         const unsigned argc = 2;
-        Local<Value> argv[argc] = {
-            Local<Value>::New(Null()),
-            Local<Value>::New(String::New(baton->result.c_str()))
+        v8::Local<v8::Value> argv[argc] = {
+            Nan::Null(),
+            Nan::New(baton->result).ToLocalChecked()
         };
 
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
+        Nan::TryCatch try_catch;
+        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
         if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
+            Nan::FatalException(try_catch);
         }
     }
 
-    baton->callback.Dispose();
+    baton->callback.Reset();
 
     delete baton;
     delete req;
 }
 
-Handle<Value> Get(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(Get) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsFunction()) {
-        return ThrowException(String::New("Usage: get(path, name, callback)"));
+    if (info.Length() < 3 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsFunction()) {
+        Nan::ThrowError("Usage: get(path, name, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[2]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[2]);
 
     GetBaton* baton = new GetBaton();
     baton->no_follow = false;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -416,25 +413,24 @@ Handle<Value> Get(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, GetWork,
                                (uv_after_work_cb)GetAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
-Handle<Value> LGet(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(LGet) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsFunction()) {
-        return ThrowException(String::New("Usage: lget(path, name, callback)"));
+    if (info.Length() < 3 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsFunction()) {
+        Nan::ThrowError("Usage: lget(path, name, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[2]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[2]);
 
     GetBaton* baton = new GetBaton();
     baton->no_follow = true;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -442,8 +438,6 @@ Handle<Value> LGet(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, GetWork,
                                (uv_after_work_cb)GetAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
 void SetWork(uv_work_t* req) {
@@ -478,59 +472,48 @@ void SetWork(uv_work_t* req) {
 }
 
 void SetAfter(uv_work_t* req) {
-    HandleScope scope;
+    Nan::HandleScope scope;
+
     SetBaton* baton = static_cast<SetBaton*>(req->data);
 
     if (baton->error) {
-        Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
-
-        err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
-
-        SetErrorCode(err, baton->errorno);
-
-        const unsigned argc = 1;
-        Local<Value> argv[argc] = { err };
-
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
-        if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
-        }
+        CallbackError(baton->error_message.c_str(), baton->errorno, Nan::New(baton->callback));
     } else {
         const unsigned argc = 1;
-        Local<Value> argv[argc] = {
-            Local<Value>::New(Null())
+        v8::Local<v8::Value> argv[argc] = {
+            Nan::Null(),
         };
 
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
+        Nan::TryCatch try_catch;
+        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
         if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
+            Nan::FatalException(try_catch);
         }
     }
 
-    baton->callback.Dispose();
+    baton->callback.Reset();
 
     delete baton;
     delete req;
 }
 
-Handle<Value> Set(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(Set) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsString() || !args[3]->IsFunction()) {
-        return ThrowException(String::New("Usage: set(path, name, value, callback)"));
+    if (info.Length() < 4 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsString() || !info[3]->IsFunction()) {
+        Nan::ThrowError("Usage: set(path, name, value, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[3]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[3]);
 
     SetBaton* baton = new SetBaton();
     baton->no_follow = false;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
-    baton->value = ValueToString(args[2]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
+    baton->value = ValueToUtf8String(info[2]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -538,26 +521,25 @@ Handle<Value> Set(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, SetWork,
                                (uv_after_work_cb)SetAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
-Handle<Value> LSet(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(LSet) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsString() || !args[3]->IsFunction()) {
-        return ThrowException(String::New("Usage: lset(path, name, value, callback)"));
+    if (info.Length() < 4 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsString() || !info[3]->IsFunction()) {
+        Nan::ThrowError("Usage: lset(path, name, value, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[3]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[3]);
 
     SetBaton* baton = new SetBaton();
     baton->no_follow = true;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
-    baton->value = ValueToString(args[2]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
+    baton->value = ValueToUtf8String(info[2]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -565,8 +547,6 @@ Handle<Value> LSet(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, SetWork,
                                (uv_after_work_cb)SetAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
 void RemoveWork(uv_work_t* req) {
@@ -600,58 +580,47 @@ void RemoveWork(uv_work_t* req) {
 }
 
 void RemoveAfter(uv_work_t* req) {
-    HandleScope scope;
+    Nan::HandleScope scope;
+
     RemoveBaton* baton = static_cast<RemoveBaton*>(req->data);
 
     if (baton->error) {
-        Local<Value> err = Exception::Error(String::New(baton->error_message.c_str()));
-
-        err->ToObject()->Set(NODE_PSYMBOL("errno"), Integer::New(baton->errorno));
-
-        SetErrorCode(err, baton->errorno);
-
-        const unsigned argc = 1;
-        Local<Value> argv[argc] = { err };
-
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
-        if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
-        }
+        CallbackError(baton->error_message.c_str(), baton->errorno, Nan::New(baton->callback));
     } else {
         const unsigned argc = 1;
-        Local<Value> argv[argc] = {
-            Local<Value>::New(Null())
+        v8::Local<v8::Value> argv[argc] = {
+            Nan::Null()
         };
 
-        TryCatch try_catch;
-        baton->callback->Call(Context::GetCurrent()->Global(), argc, argv);
+        Nan::TryCatch try_catch;
+        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
         if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
+            Nan::FatalException(try_catch);
         }
     }
 
-    baton->callback.Dispose();
+    baton->callback.Reset();
 
     delete baton;
     delete req;
 }
 
-Handle<Value> Remove(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(Remove) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsFunction()) {
-        return ThrowException(String::New("Usage: remove(path, name, callback)"));
+    if (info.Length() < 3 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsFunction()) {
+        Nan::ThrowError("Usage: remove(path, name, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[2]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[2]);
 
     RemoveBaton* baton = new RemoveBaton();
     baton->no_follow = false;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -659,25 +628,24 @@ Handle<Value> Remove(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, RemoveWork,
                                (uv_after_work_cb)RemoveAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
-Handle<Value> LRemove(const Arguments& args) {
-    HandleScope scope;
+NAN_METHOD(LRemove) {
+    Nan::HandleScope scope;
 
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[2]->IsFunction()) {
-        return ThrowException(String::New("Usage: lremove(path, name, callback)"));
+    if (info.Length() < 3 || !info[0]->IsString() || !info[1]->IsString() || !info[2]->IsFunction()) {
+        Nan::ThrowError("Usage: lremove(path, name, callback)");
+        return;
     }
 
-    Local<Function> callback = Local<Function>::Cast(args[2]);
+    v8::Local<v8::Function> callback = v8::Local<v8::Function>::Cast(info[2]);
 
     RemoveBaton* baton = new RemoveBaton();
     baton->no_follow = true;
     baton->error = false;
-    baton->callback = Persistent<Function>::New(callback);
-    baton->path = ValueToUtf8String(args[0]);
-    baton->name = ValueToString(args[1]);
+    baton->callback.Reset(callback);
+    baton->path = ValueToUtf8String(info[0]);
+    baton->name = ValueToUtf8String(info[1]);
 
     uv_work_t *req = new uv_work_t();
     req->data = baton;
@@ -685,28 +653,26 @@ Handle<Value> LRemove(const Arguments& args) {
     int status = uv_queue_work(uv_default_loop(), req, RemoveWork,
                                (uv_after_work_cb)RemoveAfter);
     assert(status == 0);
-
-    return Undefined();
 }
 
-void RegisterModule(Handle<Object> target) {
-    target->Set(String::NewSymbol("list"),
-        FunctionTemplate::New(List)->GetFunction());
-    target->Set(String::NewSymbol("get"),
-        FunctionTemplate::New(Get)->GetFunction());
-    target->Set(String::NewSymbol("set"),
-        FunctionTemplate::New(Set)->GetFunction());
-    target->Set(String::NewSymbol("remove"),
-        FunctionTemplate::New(Remove)->GetFunction());
+NAN_MODULE_INIT(RegisterModule) {
+    Nan::Set(target, Nan::New("list").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(List)).ToLocalChecked());
+    Nan::Set(target, Nan::New("get").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(Get)).ToLocalChecked());
+    Nan::Set(target, Nan::New("set").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(Set)).ToLocalChecked());
+    Nan::Set(target, Nan::New("remove").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(Remove)).ToLocalChecked());
 
-    target->Set(String::NewSymbol("llist"),
-        FunctionTemplate::New(LList)->GetFunction());
-    target->Set(String::NewSymbol("lget"),
-        FunctionTemplate::New(LGet)->GetFunction());
-    target->Set(String::NewSymbol("lset"),
-        FunctionTemplate::New(LSet)->GetFunction());
-    target->Set(String::NewSymbol("lremove"),
-        FunctionTemplate::New(LRemove)->GetFunction());
+    Nan::Set(target, Nan::New("llist").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(LList)).ToLocalChecked());
+    Nan::Set(target, Nan::New("lget").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(LGet)).ToLocalChecked());
+    Nan::Set(target, Nan::New("lset").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(LSet)).ToLocalChecked());
+    Nan::Set(target, Nan::New("lremove").ToLocalChecked(),
+        Nan::GetFunction(Nan::New<v8::FunctionTemplate>(LRemove)).ToLocalChecked());
 }
 
 NODE_MODULE(xattrAsync, RegisterModule);

@@ -1,7 +1,7 @@
 {
   "name": "xattr-async",
   "description": "Node.js async xattr library",
-  "version": "0.1.3",
+  "version": "1.0.0",
   "author": "Luka Zakrajsek <luka@koofr.net>",
   "keywords": [
     "xattr",
@@ -17,13 +17,16 @@
   ],
   "main": "./build/Release/xattrAsync",
   "engines": {
-    "node": "~1.10.2"
+    "node": ">=0.10.2"
+  },
+  "dependencies": {
+    "nan": "^2.2.1"
   },
   "devDependencies": {
-    "mocha": "~1.12.0",
-    "chai": "~1.7.2"
+    "mocha": "^2.4.5",
+    "chai": "^3.5.0"
   },
   "scripts": {
-    "test": "mocha test"
+    "test": "node-gyp rebuild && mocha test"
   }
 }

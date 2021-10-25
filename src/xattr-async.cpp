@@ -68,20 +68,22 @@ std::string ValueToUtf8String(v8::Local<v8::Value> value) {
 }
 
 v8::Local<v8::Value> CreateError(std::string error_message, int errorno) {
+    v8::Local<v8::Context> context = Nan::GetCurrentContext();
     v8::Local<v8::Value> err = Nan::Error(error_message.c_str());
+    v8::Local<v8::Object> errObj = err->ToObject(context).ToLocalChecked();
 
-    err->ToObject()->Set(Nan::New("errno").ToLocalChecked(), Nan::New(errorno));
+    Nan::Set(errObj, Nan::New("errno").ToLocalChecked(), Nan::New(errorno));
 
     if (errorno == ENOENT) {
-        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::New("ENOENT").ToLocalChecked());
+        Nan::Set(errObj, Nan::New("code").ToLocalChecked(), Nan::New("ENOENT").ToLocalChecked());
 #ifdef __APPLE__
     } else if (errorno == ENOATTR) {
 #else
     } else if (errorno == ENODATA) {
 #endif
-        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::New("ENODATA").ToLocalChecked());
+        Nan::Set(errObj, Nan::New("code").ToLocalChecked(), Nan::New("ENODATA").ToLocalChecked());
     } else {
-        err->ToObject()->Set(Nan::New("code").ToLocalChecked(), Nan::Undefined());
+        Nan::Set(errObj, Nan::New("code").ToLocalChecked(), Nan::Undefined());
     }
 
     return err;
@@ -96,7 +98,7 @@ void CallbackError(std::string error_message, int errorno, v8::Local<v8::Functio
     v8::Local<v8::Value> argv[argc] = { err };
 
     Nan::TryCatch try_catch;
-    callback.Call(argc, argv);
+    Nan::Call(callback, argc, argv);
     if (try_catch.HasCaught()) {
         Nan::FatalException(try_catch);
     }
@@ -207,7 +209,7 @@ void ListAfter(uv_work_t* req) {
 
         for (i = 0, cur = 0; cur < baton->result_len; cur += len + 1, i++) {
             len = strlen(&baton->result[cur]);
-            result->Set(i, Nan::New(&baton->result[cur]).ToLocalChecked());
+            Nan::Set(result, i, Nan::New(&baton->result[cur]).ToLocalChecked());
         }
 
         const unsigned argc = 2;
@@ -217,7 +219,7 @@ void ListAfter(uv_work_t* req) {
         };
 
         Nan::TryCatch try_catch;
-        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
+        Nan::Call(Nan::Callback(Nan::New(baton->callback)), argc, argv);
         if (try_catch.HasCaught()) {
             Nan::FatalException(try_catch);
         }
@@ -378,7 +380,7 @@ void GetAfter(uv_work_t* req) {
         };
 
         Nan::TryCatch try_catch;
-        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
+        Nan::Call(Nan::Callback(Nan::New(baton->callback)), argc, argv);
         if (try_catch.HasCaught()) {
             Nan::FatalException(try_catch);
         }
@@ -485,7 +487,7 @@ void SetAfter(uv_work_t* req) {
         };
 
         Nan::TryCatch try_catch;
-        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
+        Nan::Call(Nan::Callback(Nan::New(baton->callback)), argc, argv);
         if (try_catch.HasCaught()) {
             Nan::FatalException(try_catch);
         }
@@ -593,7 +595,7 @@ void RemoveAfter(uv_work_t* req) {
         };
 
         Nan::TryCatch try_catch;
-        Nan::Callback(Nan::New(baton->callback)).Call(argc, argv);
+        Nan::Call(Nan::Callback(Nan::New(baton->callback)), argc, argv);
         if (try_catch.HasCaught()) {
             Nan::FatalException(try_catch);
         }
